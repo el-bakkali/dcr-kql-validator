@@ -1,0 +1,32 @@
+# Rust
+src-tauri/target/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build artifacts
+*.msi
+*.exe
+!src-tauri/icons/
+
+# Certificates - NEVER commit
+*.pfx
+*.p12
+*.cer
+*.pem
+*.key
+
+# Environment
+.env
+.env.*

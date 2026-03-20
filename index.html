@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DCR & KQL Transformation Validator</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>DCR & KQL Transformation Validator</h1>
+        <span class="subtitle">Offline validation for Azure Monitor</span>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="kql">KQL Transformation Validator</button>
+        <button class="tab" data-tab="dcr">DCR JSON Validator</button>
+      </nav>
+
+      <main class="content">
+        <!-- KQL Validator Tab -->
+        <section id="tab-kql" class="tab-panel active">
+          <div class="editor-area">
+            <label for="kql-input">KQL Transformation Query</label>
+            <textarea id="kql-input" spellcheck="false" placeholder="source&#10;| where severity == &quot;Critical&quot;&#10;| extend Properties = parse_json(properties)&#10;| project TimeGenerated, Category, Message"></textarea>
+          </div>
+          <div class="actions">
+            <button id="kql-validate" class="btn btn-primary">Validate</button>
+            <button id="kql-clear" class="btn btn-secondary">Clear</button>
+            <select id="kql-samples" class="btn btn-secondary">
+              <option value="">Load Sample...</option>
+              <option value="valid-filter">Valid: Filter query</option>
+              <option value="valid-transform">Valid: Transform with parse_json</option>
+              <option value="valid-project">Valid: Project with TimeGenerated</option>
+              <option value="invalid-summarize">Invalid: Uses summarize</option>
+              <option value="invalid-join">Invalid: Uses join</option>
+              <option value="invalid-start">Invalid: Wrong start (no source)</option>
+              <option value="invalid-function">Invalid: Wrong function name</option>
+            </select>
+          </div>
+          <div id="kql-results" class="results"></div>
+        </section>
+
+        <!-- DCR Validator Tab -->
+        <section id="tab-dcr" class="tab-panel">
+          <div class="editor-area">
+            <label for="dcr-input">DCR JSON Definition</label>
+            <textarea id="dcr-input" spellcheck="false" placeholder='{&#10;  "location": "eastus",&#10;  "properties": {&#10;    "dataSources": {},&#10;    "destinations": { ... },&#10;    "dataFlows": [ ... ]&#10;  }&#10;}'></textarea>
+          </div>
+          <div class="actions">
+            <button id="dcr-validate" class="btn btn-primary">Validate</button>
+            <button id="dcr-clear" class="btn btn-secondary">Clear</button>
+            <select id="dcr-samples" class="btn btn-secondary">
+              <option value="">Load Sample...</option>
+              <option value="valid-syslog">Valid: Syslog DCR</option>
+              <option value="valid-workspace">Valid: Workspace Transforms</option>
+              <option value="valid-custom">Valid: Custom table (Logs API)</option>
+              <option value="valid-textlog">Valid: Custom text log (AMA)</option>
+              <option value="valid-jsonlog">Valid: Custom JSON log (AMA)</option>
+              <option value="invalid-missing">Invalid: Missing destinations</option>
+              <option value="invalid-kql">Invalid: Bad KQL in transformKql</option>
+              <option value="invalid-stream">Invalid: Undeclared custom stream</option>
+              <option value="invalid-logfile">Invalid: logFiles missing endpoint</option>
+            </select>
+          </div>
+          <div id="dcr-results" class="results"></div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <span>Offline tool &mdash; No data leaves this machine</span>
+        <span>Built with OWASP ASVS, NIST CSF, CIS Controls in mind</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,94 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Run clippy
+        working-directory: src-tauri
+        run: cargo clippy -- -D warnings
+
+      - name: Build Tauri application
+        run: npx tauri build
+
+      - name: Generate SHA256 checksums
+        run: |
+          $exe = Get-Item "src-tauri\target\release\dcr-kql-validator.exe"
+          $msi = Get-Item "src-tauri\target\release\bundle\msi\*.msi"
+          $checksums = @()
+          $checksums += "$(Get-FileHash $exe.FullName -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $($exe.Name)"
+          $checksums += "$(Get-FileHash $msi.FullName -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $($msi.Name)"
+          $checksums | Out-File -FilePath "checksums-sha256.txt" -Encoding utf8
+          Get-Content "checksums-sha256.txt"
+
+      - name: Get version from tag
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "DCR & KQL Validator v${{ env.VERSION }}"
+          body: |
+            ## DCR & KQL Transformation Validator v${{ env.VERSION }}
+
+            Offline desktop tool for validating Azure Monitor Data Collection Rules and KQL transformation queries.
+
+            ### Downloads
+            | File | Description |
+            |------|-------------|
+            | `.msi` | Windows installer |
+            | `.exe` | Standalone executable |
+            | `checksums-sha256.txt` | SHA-256 integrity hashes |
+
+            ### Security
+            - Fully offline — no data leaves your machine
+            - Built with OWASP ASVS, NIST CSF, and CIS Controls in mind
+          draft: false
+          prerelease: false
+          files: |
+            src-tauri/target/release/dcr-kql-validator.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            checksums-sha256.txt
