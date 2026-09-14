@@ -25,18 +25,33 @@ async function loadMonaco() {
 
     // Monaco resolves its workers through this hook rather than bundler imports.
     // Classic workers, so the Kusto scripts can be loaded with importScripts.
-    const [{ default: KustoWorker }, { default: EditorWorker }] = await Promise.all([
+    const [{ default: KustoWorker }, { default: JsonWorker }, { default: EditorWorker }] = await Promise.all([
       import("./monaco-kusto.worker.js?worker"),
+      import("./monaco-json.worker.js?worker"),
       import("./monaco-editor.worker.js?worker"),
     ]);
 
     self.MonacoEnvironment = {
       getWorker(_moduleId, label) {
-        return label === "kusto" ? new KustoWorker() : new EditorWorker();
+        if (label === "kusto") return new KustoWorker();
+        if (label === "json") return new JsonWorker();
+        return new EditorWorker();
       },
     };
 
-    await import("@kusto/monaco-kusto/release/esm/monaco.contribution.js");
+    // editor.api carries no languages, so both have to be registered.
+    const [, { jsonDefaults }] = await Promise.all([
+      import("@kusto/monaco-kusto/release/esm/monaco.contribution.js"),
+      import("monaco-editor/esm/vs/language/json/monaco.contribution.js"),
+    ]);
+
+    // A DCR is strict JSON, and we validate the semantics ourselves.
+    jsonDefaults.setDiagnosticsOptions({
+      validate: true,
+      allowComments: false,
+      schemas: [],
+      enableSchemaRequest: false,
+    });
 
     monaco.editor.defineTheme("dcr-light", {
       base: "vs",
