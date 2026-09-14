@@ -36,15 +36,34 @@ function setupTabs() {
   const tabs = [...document.querySelectorAll(".tab")];
   const panels = [...document.querySelectorAll(".panel")];
 
+  function select(tab, { focus = false } = {}) {
+    for (const t of tabs) {
+      const active = t === tab;
+      t.classList.toggle("active", active);
+      t.setAttribute("aria-selected", String(active));
+      // Roving tabindex: only the selected tab is in the tab order.
+      t.tabIndex = active ? 0 : -1;
+    }
+    for (const p of panels) p.classList.toggle("active", p.id === `panel-${tab.dataset.tab}`);
+    if (focus) tab.focus();
+    editors[tab.dataset.tab]?.editor?.layout?.();
+  }
+
   for (const tab of tabs) {
-    tab.addEventListener("click", () => {
-      for (const t of tabs) {
-        const active = t === tab;
-        t.classList.toggle("active", active);
-        t.setAttribute("aria-selected", String(active));
-      }
-      for (const p of panels) p.classList.toggle("active", p.id === `panel-${tab.dataset.tab}`);
-      editors[tab.dataset.tab]?.editor?.layout?.();
+    tab.addEventListener("click", () => select(tab));
+
+    tab.addEventListener("keydown", (event) => {
+      const moves = { ArrowRight: 1, ArrowLeft: -1, Home: "first", End: "last" };
+      const move = moves[event.key];
+      if (move === undefined) return;
+
+      event.preventDefault();
+      const index = tabs.indexOf(tab);
+      const next =
+        move === "first" ? tabs[0]
+        : move === "last" ? tabs[tabs.length - 1]
+        : tabs[(index + move + tabs.length) % tabs.length];
+      select(next, { focus: true });
     });
   }
 }

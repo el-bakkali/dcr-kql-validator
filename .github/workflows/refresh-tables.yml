@@ -1,0 +1,71 @@
+name: Refresh table reference
+
+# The Azure Monitor table docs change as tables and columns are added. Our copy
+# is a committed snapshot, so without this it goes quietly stale.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Regenerate from the Azure Monitor docs
+        run: npm run generate:tables
+
+      - name: Fail if the upstream format changed
+        run: npm test
+
+      - name: Summarise the change
+        id: diff
+        run: |
+          if git diff --quiet -- src/data; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change to the table reference."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "summary<<EOF"
+              node -e "
+                const fs = require('fs');
+                const index = JSON.parse(fs.readFileSync('src/data/tables-index.json', 'utf8'));
+                const columns = JSON.parse(fs.readFileSync('src/data/tables-columns.json', 'utf8'));
+                const transformable = index.tables.filter(t => t[1] === 1).length;
+                const columnCount = Object.values(columns.tables).reduce((n, c) => n + c.length, 0);
+                console.log('- ' + index.tables.length + ' tables, ' + transformable + ' support transformations');
+                console.log('- ' + columnCount + ' columns across ' + Object.keys(columns.tables).length + ' tables');
+                console.log('- generated ' + index.generated);
+              "
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: refresh-tables
+          title: Refresh the Log Analytics table reference
+          commit-message: Refresh the Log Analytics table reference
+          body: |
+            Regenerated from the Azure Monitor documentation.
+
+            ${{ steps.diff.outputs.summary }}
+
+            Tests pass against the new data, so the upstream format still parses.
+          add-paths: src/data
+          delete-branch: true

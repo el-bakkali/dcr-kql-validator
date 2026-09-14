@@ -9,12 +9,13 @@
 
 let monacoPromise = null;
 
-const TOO_SMALL = 700;
+// Monaco needs room for a gutter, scrollbar and a readable line. Below this the
+// plain textarea is genuinely the better editor, on a phone or a narrow window.
+const MIN_WIDTH = 700;
 
 function shouldUseMonaco() {
   if (typeof window === "undefined") return false;
-  if (window.matchMedia?.("(pointer: coarse)").matches && window.innerWidth < TOO_SMALL) return false;
-  return true;
+  return window.innerWidth >= MIN_WIDTH;
 }
 
 async function loadMonaco() {

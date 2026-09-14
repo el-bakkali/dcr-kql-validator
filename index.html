@@ -25,9 +25,9 @@
       </nav>
     </header>
 
-    <nav class="tabs" role="tablist">
-      <button class="tab active" role="tab" data-tab="kql" aria-selected="true">KQL transformation</button>
-      <button class="tab" role="tab" data-tab="dcr" aria-selected="false">DCR definition</button>
+    <nav class="tabs" role="tablist" aria-label="Validator">
+      <button class="tab active" role="tab" id="tab-kql" data-tab="kql" aria-selected="true" aria-controls="panel-kql">KQL transformation</button>
+      <button class="tab" role="tab" id="tab-dcr" data-tab="dcr" aria-selected="false" aria-controls="panel-dcr" tabindex="-1">DCR definition</button>
     </nav>
 
     <main class="app-main">
@@ -45,7 +45,7 @@
       </div>
 
       <!-- KQL -->
-      <section class="panel active" id="panel-kql" role="tabpanel">
+      <section class="panel active" id="panel-kql" role="tabpanel" aria-labelledby="tab-kql" tabindex="0">
         <div class="config-strip">
           <div class="config-field">
             <label class="config-label" for="kql-schema-source">Stream schema</label>
@@ -118,7 +118,7 @@
       </section>
 
       <!-- DCR -->
-      <section class="panel" id="panel-dcr" role="tabpanel">
+      <section class="panel" id="panel-dcr" role="tabpanel" aria-labelledby="tab-dcr" tabindex="0">
         <div class="config-strip">
           <div class="config-field config-field-grow">
             <span class="config-label">Input</span>
