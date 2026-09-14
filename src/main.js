@@ -1,436 +1,233 @@
-import { invoke } from "@tauri-apps/api/core";
+import "./styles.css";
+import { validateKqlAsync, validateDcrAsync, warmUp } from "./app/validator-client.js";
+import { renderResults, renderPlaceholder, renderError } from "./app/results.js";
+import { createEditor } from "./app/editor.js";
+import { KQL_SAMPLE, DCR_SAMPLE, SAMPLE_COLUMNS } from "./app/samples.js";
 
-// ── Tab switching ──
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+const editors = {};
+globalThis.__editors = editors;
+
+setupTabs();
+setupBanner();
+setupKql();
+setupDcr();
+warmUp();
+
+function setupBanner() {
+  const banner = document.getElementById("welcome-banner");
+  if (!banner) return;
+
+  if (localStorage.getItem("welcome-dismissed") === "1") {
+    banner.hidden = true;
+  }
+
+  document.getElementById("welcome-dismiss")?.addEventListener("click", () => {
+    banner.hidden = true;
+    localStorage.setItem("welcome-dismissed", "1");
   });
-});
 
-// ── KQL Validator ──
-document.getElementById("kql-validate").addEventListener("click", async () => {
-  const query = document.getElementById("kql-input").value;
-  const btn = document.getElementById("kql-validate");
-  btn.classList.add("loading");
-  btn.textContent = "Validating...";
-  try {
-    const result = await invoke("validate_kql", { query });
-    renderResults("kql-results", result);
-  } catch (err) {
-    renderError("kql-results", err);
-  } finally {
-    btn.classList.remove("loading");
-    btn.textContent = "Validate";
-  }
-});
-
-document.getElementById("kql-clear").addEventListener("click", () => {
-  document.getElementById("kql-input").value = "";
-  document.getElementById("kql-results").innerHTML = "";
-});
-
-// ── DCR Validator ──
-document.getElementById("dcr-validate").addEventListener("click", async () => {
-  const json = document.getElementById("dcr-input").value;
-  const btn = document.getElementById("dcr-validate");
-  btn.classList.add("loading");
-  btn.textContent = "Validating...";
-  try {
-    const result = await invoke("validate_dcr", { json });
-    renderResults("dcr-results", result);
-  } catch (err) {
-    renderError("dcr-results", err);
-  } finally {
-    btn.classList.remove("loading");
-    btn.textContent = "Validate";
-  }
-});
-
-document.getElementById("dcr-clear").addEventListener("click", () => {
-  document.getElementById("dcr-input").value = "";
-  document.getElementById("dcr-results").innerHTML = "";
-});
-
-// ── Render results ──
-function renderResults(containerId, result) {
-  const container = document.getElementById(containerId);
-  let html = "";
-
-  // Header
-  const errorCount = result.errors.length;
-  const warnCount = result.warnings.length;
-  const infoCount = result.info.length;
-
-  if (result.valid) {
-    html += `<div class="result-header valid">&#10003; Validation Passed`;
-    if (warnCount > 0) html += ` <span class="badge badge-warning">${warnCount} warning${warnCount > 1 ? "s" : ""}</span>`;
-    if (infoCount > 0) html += ` <span class="badge badge-info">${infoCount} info</span>`;
-    html += `</div>`;
-  } else {
-    html += `<div class="result-header invalid">&#10007; Validation Failed`;
-    html += ` <span class="badge badge-error">${errorCount} error${errorCount > 1 ? "s" : ""}</span>`;
-    if (warnCount > 0) html += ` <span class="badge badge-warning">${warnCount} warning${warnCount > 1 ? "s" : ""}</span>`;
-    html += `</div>`;
-  }
-
-  // Errors
-  for (const err of result.errors) {
-    html += renderItem("error", "E", err);
-  }
-
-  // Warnings
-  for (const warn of result.warnings) {
-    html += renderItem("warning", "W", warn);
-  }
-
-  // Info
-  for (const info of result.info) {
-    html += renderItem("info", "i", info);
-  }
-
-  container.innerHTML = html;
+  document.getElementById("banner-sample")?.addEventListener("click", () => {
+    const active = document.querySelector(".tab.active")?.dataset.tab ?? "kql";
+    document.getElementById(`${active}-sample`)?.click();
+  });
 }
 
-function renderItem(severity, icon, item) {
-  let html = `<div class="result-item">`;
-  html += `<div class="result-icon ${severity}">${icon}</div>`;
-  html += `<div class="result-body">`;
-  html += `<div class="result-code">${escapeHtml(item.code)}</div>`;
-  html += `<div class="result-message">${escapeHtml(item.message)}</div>`;
-  if (item.suggestion) {
-    html += `<div class="result-suggestion">${escapeHtml(item.suggestion)}</div>`;
+function setupTabs() {
+  const tabs = [...document.querySelectorAll(".tab")];
+  const panels = [...document.querySelectorAll(".panel")];
+
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => {
+      for (const t of tabs) {
+        const active = t === tab;
+        t.classList.toggle("active", active);
+        t.setAttribute("aria-selected", String(active));
+      }
+      for (const p of panels) p.classList.toggle("active", p.id === `panel-${tab.dataset.tab}`);
+      editors[tab.dataset.tab]?.editor?.layout?.();
+    });
   }
-  html += `</div></div>`;
-  return html;
 }
 
-function renderError(containerId, err) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = `<div class="result-header invalid">&#10007; Internal Error</div>
-    <div class="result-item">
-      <div class="result-icon error">E</div>
-      <div class="result-body">
-        <div class="result-message">${escapeHtml(String(err))}</div>
-      </div>
-    </div>`;
+function setupKql() {
+  const input = document.getElementById("kql-input");
+  const host = document.getElementById("kql-monaco");
+  const results = document.getElementById("kql-results");
+  const status = document.getElementById("kql-status");
+  const schemaSelect = document.getElementById("kql-schema-source");
+  const schemaPanel = document.getElementById("kql-schema-panel");
+  const schemaInput = document.getElementById("kql-schema");
+  const tableField = document.getElementById("kql-table-field");
+  const tableInput = document.getElementById("kql-table");
+  const tableList = document.getElementById("kql-table-list");
+  const sourceHint = document.getElementById("kql-source-hint");
+
+  // The table reference is only worth downloading if the user asks for it.
+  let tablesModule = null;
+  const loadTables = async () => (tablesModule ??= await import("./core/tables.js"));
+
+  renderPlaceholder(results, "Enter a transformation query and select Validate.");
+
+  schemaSelect.addEventListener("change", async () => {
+    const mode = schemaSelect.value;
+    schemaPanel.hidden = mode !== "custom";
+    tableField.hidden = mode !== "table";
+
+    if (mode === "table" && !tableList.childElementCount) {
+      const { listTransformableTables } = await loadTables();
+      tableList.append(
+        ...listTransformableTables().map((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          return option;
+        }),
+      );
+    }
+    applySchema();
+  });
+
+  schemaInput.addEventListener("change", applySchema);
+  tableInput.addEventListener("change", applySchema);
+
+  createEditor({ host, textarea: input, language: "kusto" }).then((e) => {
+    if (e) {
+      editors.kql = e;
+      applySchema();
+    }
+  });
+
+  document.getElementById("kql-sample").addEventListener("click", () => {
+    setValue("kql", input, KQL_SAMPLE);
+    schemaSelect.value = "custom";
+    schemaPanel.hidden = false;
+    tableField.hidden = true;
+    schemaInput.value = JSON.stringify(SAMPLE_COLUMNS, null, 2);
+    applySchema();
+  });
+
+  document.getElementById("kql-clear").addEventListener("click", () => {
+    setValue("kql", input, "");
+    editors.kql?.setMarkers([]);
+    renderPlaceholder(results, "Enter a transformation query and select Validate.");
+    status.textContent = "";
+  });
+
+  document.getElementById("kql-validate").addEventListener("click", async () => {
+    const query = getValue("kql", input);
+    const columns = await readColumns();
+
+    status.textContent = "Validating\u2026";
+    try {
+      const result = await validateKqlAsync(query, columns);
+      renderResults(results, result, {
+        context: columns ? null : "No stream schema supplied, so column names and types were not checked.",
+      });
+      editors.kql?.setMarkers([...result.errors, ...result.warnings]);
+      status.textContent = "";
+    } catch (err) {
+      renderError(results, err.message);
+      status.textContent = "";
+    }
+  });
+
+  async function readColumns() {
+    if (schemaSelect.value === "custom") {
+      const raw = schemaInput.value.trim();
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed.columns)) return parsed.columns;
+        return null;
+      } catch {
+        return null;
+      }
+    }
+
+    if (schemaSelect.value === "table") {
+      const name = tableInput.value.trim();
+      if (!name) return null;
+      const { getTableColumns } = await loadTables();
+      return await getTableColumns(name);
+    }
+
+    return null;
+  }
+
+  async function applySchema() {
+    const columns = await readColumns();
+
+    if (schemaSelect.value === "table") {
+      const name = tableInput.value.trim();
+      tableInput.classList.toggle("is-invalid", Boolean(name) && !columns);
+
+      if (columns) {
+        const { findTable, tableDocUrl } = await loadTables();
+        const table = findTable(name);
+        sourceHint.replaceChildren(
+          document.createTextNode(`source is the ${table.name} schema, ${columns.length} columns`),
+        );
+
+        const url = tableDocUrl(name);
+        if (url) {
+          const link = document.createElement("a");
+          link.className = "hint-link";
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "Schema reference";
+          sourceHint.append(document.createTextNode(" \u00b7 "), link);
+        }
+      } else {
+        sourceHint.textContent = "Transformation query starting with source";
+      }
+    } else {
+      tableInput.classList.remove("is-invalid");
+      sourceHint.innerHTML = "Transformation query starting with <code>source</code>";
+    }
+
+    editors.kql?.setSchema(columns ?? []);
+  }
 }
 
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+function setupDcr() {
+  const input = document.getElementById("dcr-input");
+  const host = document.getElementById("dcr-monaco");
+  const results = document.getElementById("dcr-results");
+  const status = document.getElementById("dcr-status");
+
+  renderPlaceholder(results, "Paste a data collection rule and select Validate.");
+
+  createEditor({ host, textarea: input, language: "json" }).then((e) => {
+    if (e) editors.dcr = e;
+  });
+
+  document.getElementById("dcr-sample").addEventListener("click", () => setValue("dcr", input, DCR_SAMPLE));
+
+  document.getElementById("dcr-clear").addEventListener("click", () => {
+    setValue("dcr", input, "");
+    renderPlaceholder(results, "Paste a data collection rule and select Validate.");
+    status.textContent = "";
+  });
+
+  document.getElementById("dcr-validate").addEventListener("click", async () => {
+    status.textContent = "Validating\u2026";
+    try {
+      const result = await validateDcrAsync(getValue("dcr", input));
+      renderResults(results, result);
+      status.textContent = "";
+    } catch (err) {
+      renderError(results, err.message);
+      status.textContent = "";
+    }
+  });
 }
 
-// ── Sample data ──
-const KQL_SAMPLES = {
-  "valid-filter": `source
-| where severity == "Critical"
-| project TimeGenerated, Message, severity`,
+function getValue(key, textarea) {
+  return editors[key]?.getValue() ?? textarea.value;
+}
 
-  "valid-transform": `source
-| extend Properties = parse_json(properties)
-| extend Level = toint(Properties.Level)
-| extend DeviceId = tostring(Properties.DeviceID)
-| project TimeGenerated, Message, Level, DeviceId`,
-
-  "valid-project": `source
-| where EventLevelName in ('Error', 'Critical', 'Warning')
-| project-away ParameterXml`,
-
-  "invalid-summarize": `source
-| summarize count() by severity
-| project TimeGenerated, severity, count_`,
-
-  "invalid-join": `source
-| join kind=inner (OtherTable) on CommonKey
-| project TimeGenerated, Message`,
-
-  "invalid-start": `Syslog
-| where SeverityLevel != "info"
-| project TimeGenerated, Message`,
-
-  "invalid-function": `source
-| extend col = column_ifexists('MyCol', '')
-| project TimeGenerated, col`,
-};
-
-const DCR_SAMPLES = {
-  "valid-syslog": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataSources: {
-        syslog: [{
-          name: "syslogBase",
-          streams: ["Microsoft-Syslog"],
-          facilityNames: ["daemon", "syslog"],
-          logLevels: ["Warning", "Error", "Critical", "Alert", "Emergency"]
-        }]
-      },
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace",
-          name: "centralWorkspace"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Microsoft-Syslog"],
-        destinations: ["centralWorkspace"],
-        transformKql: "source | where SeverityLevel != 'info'",
-        outputStream: "Microsoft-Syslog"
-      }]
-    }
-  }, null, 2),
-
-  "valid-workspace": JSON.stringify({
-    kind: "WorkspaceTransforms",
-    location: "eastus",
-    properties: {
-      dataSources: {},
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace",
-          name: "clv2ws1"
-        }]
-      },
-      dataFlows: [
-        {
-          streams: ["Microsoft-Table-LAQueryLogs"],
-          destinations: ["clv2ws1"],
-          transformKql: "source | where QueryText !contains 'LAQueryLogs'"
-        },
-        {
-          streams: ["Microsoft-Table-Event"],
-          destinations: ["clv2ws1"],
-          transformKql: "source | where EventLevelName in ('Error', 'Critical', 'Warning') | project-away ParameterXml"
-        }
-      ]
-    }
-  }, null, 2),
-
-  "valid-custom": JSON.stringify({
-    location: "eastus",
-    kind: "Direct",
-    properties: {
-      streamDeclarations: {
-        "Custom-MyTable": {
-          columns: [
-            { name: "Time", type: "datetime" },
-            { name: "Computer", type: "string" },
-            { name: "AdditionalContext", type: "string" }
-          ]
-        }
-      },
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace",
-          name: "LogAnalyticsDest"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Custom-MyTable"],
-        destinations: ["LogAnalyticsDest"],
-        transformKql: "source | extend jsonContext = parse_json(AdditionalContext) | project TimeGenerated = Time, Computer, AdditionalContext = jsonContext, ExtendedColumn = tostring(jsonContext.CounterName)",
-        outputStream: "Custom-MyTable_CL"
-      }]
-    }
-  }, null, 2),
-
-  "invalid-missing": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataSources: {},
-      dataFlows: [{
-        streams: ["Microsoft-Syslog"],
-        destinations: ["missingDest"],
-        transformKql: "source"
-      }]
-    }
-  }, null, 2),
-
-  "invalid-kql": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataSources: {},
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/xxx/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws",
-          name: "ws"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Microsoft-Syslog"],
-        destinations: ["ws"],
-        transformKql: "source | summarize count() by SeverityLevel",
-        outputStream: "Microsoft-Syslog"
-      }]
-    }
-  }, null, 2),
-
-  "valid-textlog": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataCollectionEndpointId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.Insights/dataCollectionEndpoints/my-dce",
-      streamDeclarations: {
-        "Custom-MyLogFileFormat": {
-          columns: [
-            { name: "TimeGenerated", type: "datetime" },
-            { name: "RawData", type: "string" },
-            { name: "FilePath", type: "string" },
-            { name: "Computer", type: "string" }
-          ]
-        }
-      },
-      dataSources: {
-        logFiles: [{
-          streams: ["Custom-MyLogFileFormat"],
-          filePatterns: ["C:\\logs\\*.txt"],
-          format: "text",
-          settings: {
-            text: {
-              recordStartTimestampFormat: "ISO 8601"
-            }
-          },
-          name: "myLogFileFormat-Windows"
-        }]
-      },
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace",
-          name: "MyDestination"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Custom-MyLogFileFormat"],
-        destinations: ["MyDestination"],
-        transformKql: "source | project d = split(RawData,\",\") | project TimeGenerated=todatetime(d[0]), Code=toint(d[1]), Severity=tostring(d[2]), Module=tostring(d[3]), Message=tostring(d[4])",
-        outputStream: "Custom-MyTable_CL"
-      }]
-    }
-  }, null, 2),
-
-  "valid-jsonlog": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataCollectionEndpointId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.Insights/dataCollectionEndpoints/my-dce",
-      streamDeclarations: {
-        "Custom-Json-stream": {
-          columns: [
-            { name: "TimeGenerated", type: "datetime" },
-            { name: "FilePath", type: "string" },
-            { name: "Code", type: "int" },
-            { name: "Module", type: "string" },
-            { name: "Message", type: "string" }
-          ]
-        }
-      },
-      dataSources: {
-        logFiles: [{
-          streams: ["Custom-Json-stream"],
-          filePatterns: ["C:\\logs\\*.json"],
-          format: "json",
-          name: "MyJsonFile"
-        }]
-      },
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e/resourceGroups/my-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace",
-          name: "MyDestination"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Custom-Json-stream"],
-        destinations: ["MyDestination"],
-        transformKql: "source",
-        outputStream: "Custom-MyTable_CL"
-      }]
-    }
-  }, null, 2),
-
-  "invalid-stream": JSON.stringify({
-    location: "eastus",
-    properties: {
-      dataSources: {},
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/xxx/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws",
-          name: "ws"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Custom-UndeclaredStream"],
-        destinations: ["ws"],
-        transformKql: "source",
-        outputStream: "Custom-MyTable_CL"
-      }]
-    }
-  }, null, 2),
-
-  "invalid-logfile": JSON.stringify({
-    location: "eastus",
-    properties: {
-      streamDeclarations: {
-        "Custom-MyLog": {
-          columns: [
-            { name: "TimeGenerated", type: "datetime" },
-            { name: "RawData", type: "string" }
-          ]
-        }
-      },
-      dataSources: {
-        logFiles: [{
-          streams: ["Custom-MyLog"],
-          filePatterns: ["C:\\logs\\*.txt"],
-          format: "text",
-          name: "myLog"
-        }]
-      },
-      destinations: {
-        logAnalytics: [{
-          workspaceResourceId: "/subscriptions/xxx/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws",
-          name: "ws"
-        }]
-      },
-      dataFlows: [{
-        streams: ["Custom-MyLog"],
-        destinations: ["ws"],
-        transformKql: "source",
-        outputStream: "Custom-MyTable_CL"
-      }]
-    }
-  }, null, 2),
-};
-
-// ── Sample loaders ──
-document.getElementById("kql-samples").addEventListener("change", (e) => {
-  const key = e.target.value;
-  if (key && KQL_SAMPLES[key]) {
-    document.getElementById("kql-input").value = KQL_SAMPLES[key];
-    document.getElementById("kql-results").innerHTML = "";
-  }
-  e.target.value = "";
-});
-
-document.getElementById("dcr-samples").addEventListener("change", (e) => {
-  const key = e.target.value;
-  if (key && DCR_SAMPLES[key]) {
-    document.getElementById("dcr-input").value = DCR_SAMPLES[key];
-    document.getElementById("dcr-results").innerHTML = "";
-  }
-  e.target.value = "";
-});
-
-// ── Keyboard shortcut: Ctrl+Enter to validate ──
-document.getElementById("kql-input").addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.key === "Enter") {
-    document.getElementById("kql-validate").click();
-  }
-});
-
-document.getElementById("dcr-input").addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.key === "Enter") {
-    document.getElementById("dcr-validate").click();
-  }
-});
+function setValue(key, textarea, value) {
+  textarea.value = value;
+  editors[key]?.setValue(value);
+}

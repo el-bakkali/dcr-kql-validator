@@ -1,78 +1,162 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DCR & KQL Transformation Validator</title>
-    <link rel="stylesheet" href="/src/styles.css" />
+    <meta
+      name="description"
+      content="Validate Azure Monitor data collection rules and KQL transformation queries in your browser. Nothing is uploaded."
+    />
+    <title>DCR &amp; KQL Transformation Validator</title>
   </head>
   <body>
-    <div id="app">
-      <header class="app-header">
-        <h1>DCR & KQL Transformation Validator</h1>
-        <span class="subtitle">Offline validation for Azure Monitor</span>
-      </header>
-
-      <nav class="tabs">
-        <button class="tab active" data-tab="kql">KQL Transformation Validator</button>
-        <button class="tab" data-tab="dcr">DCR JSON Validator</button>
+    <header class="appbar">
+      <div class="appbar-brand">
+        <span class="app-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div class="app-titles">
+          <h1>DCR &amp; KQL Validator</h1>
+          <p>Validator for Azure Monitor data collection rules and transformations</p>
+        </div>
+      </div>
+      <nav class="appbar-nav">
+        <a class="navlink" href="https://learn.microsoft.com/azure/azure-monitor/data-collection/data-collection-transformations-kql" target="_blank" rel="noopener">KQL reference</a>
+        <a class="navlink" href="https://learn.microsoft.com/azure/azure-monitor/data-collection/data-collection-rule-structure" target="_blank" rel="noopener">DCR structure</a>
+        <a class="navlink" href="https://github.com/el-bakkali/dcr-kql-validator" target="_blank" rel="noopener">Source</a>
       </nav>
+    </header>
 
-      <main class="content">
-        <!-- KQL Validator Tab -->
-        <section id="tab-kql" class="tab-panel active">
-          <div class="editor-area">
-            <label for="kql-input">KQL Transformation Query</label>
-            <textarea id="kql-input" spellcheck="false" placeholder="source&#10;| where severity == &quot;Critical&quot;&#10;| extend Properties = parse_json(properties)&#10;| project TimeGenerated, Category, Message"></textarea>
-          </div>
-          <div class="actions">
-            <button id="kql-validate" class="btn btn-primary">Validate</button>
-            <button id="kql-clear" class="btn btn-secondary">Clear</button>
-            <select id="kql-samples" class="btn btn-secondary">
-              <option value="">Load Sample...</option>
-              <option value="valid-filter">Valid: Filter query</option>
-              <option value="valid-transform">Valid: Transform with parse_json</option>
-              <option value="valid-project">Valid: Project with TimeGenerated</option>
-              <option value="invalid-summarize">Invalid: Uses summarize</option>
-              <option value="invalid-join">Invalid: Uses join</option>
-              <option value="invalid-start">Invalid: Wrong start (no source)</option>
-              <option value="invalid-function">Invalid: Wrong function name</option>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" role="tab" data-tab="kql" aria-selected="true">KQL transformation</button>
+      <button class="tab" role="tab" data-tab="dcr" aria-selected="false">DCR definition</button>
+    </nav>
+
+    <main class="app-main">
+      <div class="banner" id="welcome-banner">
+        <button class="banner-close" id="welcome-dismiss" aria-label="Dismiss">&times;</button>
+        <h2>Validate before you deploy</h2>
+        <p>
+          Paste a transformation query or a data collection rule to check it against the
+          Azure Monitor rules. Add a <strong>stream schema</strong> to enable column and type
+          checking. Everything runs in your browser and nothing is uploaded.
+        </p>
+        <div class="banner-actions">
+          <button class="btn btn-primary btn-sm" id="banner-sample">Load a sample</button>
+        </div>
+      </div>
+
+      <!-- KQL -->
+      <section class="panel active" id="panel-kql" role="tabpanel">
+        <div class="config-strip">
+          <div class="config-field">
+            <label class="config-label" for="kql-schema-source">Stream schema</label>
+            <select id="kql-schema-source">
+              <option value="">None (skips column checks)</option>
+              <option value="table">Standard Azure Monitor table</option>
+              <option value="custom">Paste streamDeclarations columns</option>
             </select>
           </div>
-          <div id="kql-results" class="results"></div>
-        </section>
-
-        <!-- DCR Validator Tab -->
-        <section id="tab-dcr" class="tab-panel">
-          <div class="editor-area">
-            <label for="dcr-input">DCR JSON Definition</label>
-            <textarea id="dcr-input" spellcheck="false" placeholder='{&#10;  "location": "eastus",&#10;  "properties": {&#10;    "dataSources": {},&#10;    "destinations": { ... },&#10;    "dataFlows": [ ... ]&#10;  }&#10;}'></textarea>
+          <div class="config-field" id="kql-table-field" hidden>
+            <label class="config-label" for="kql-table">Table</label>
+            <input
+              id="kql-table"
+              list="kql-table-list"
+              placeholder="Perf"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <datalist id="kql-table-list"></datalist>
           </div>
-          <div class="actions">
-            <button id="dcr-validate" class="btn btn-primary">Validate</button>
-            <button id="dcr-clear" class="btn btn-secondary">Clear</button>
-            <select id="dcr-samples" class="btn btn-secondary">
-              <option value="">Load Sample...</option>
-              <option value="valid-syslog">Valid: Syslog DCR</option>
-              <option value="valid-workspace">Valid: Workspace Transforms</option>
-              <option value="valid-custom">Valid: Custom table (Logs API)</option>
-              <option value="valid-textlog">Valid: Custom text log (AMA)</option>
-              <option value="valid-jsonlog">Valid: Custom JSON log (AMA)</option>
-              <option value="invalid-missing">Invalid: Missing destinations</option>
-              <option value="invalid-kql">Invalid: Bad KQL in transformKql</option>
-              <option value="invalid-stream">Invalid: Undeclared custom stream</option>
-              <option value="invalid-logfile">Invalid: logFiles missing endpoint</option>
-            </select>
+          <div class="config-field config-field-grow">
+            <span class="config-label">Source</span>
+            <span class="config-static" id="kql-source-hint">
+              Transformation query starting with <code>source</code>
+            </span>
           </div>
-          <div id="dcr-results" class="results"></div>
-        </section>
-      </main>
+        </div>
 
-      <footer class="app-footer">
-        <span>Offline tool &mdash; No data leaves this machine</span>
-        <span>Built with OWASP ASVS, NIST CSF, CIS Controls in mind</span>
-      </footer>
-    </div>
+        <div class="schema-input" id="kql-schema-panel" hidden>
+          <textarea
+            id="kql-schema"
+            spellcheck="false"
+            placeholder='[{"name":"TimeGenerated","type":"datetime"},{"name":"Message","type":"string"}]'
+          ></textarea>
+          <p class="hint">
+            Paste the <code>columns</code> array from your <code>streamDeclarations</code>. This enables
+            column name checking, type checking and autocomplete.
+          </p>
+        </div>
+
+        <div class="workspace">
+          <section class="card editor-column">
+            <div class="card-head">
+              <h2>Query</h2>
+              <button class="btn btn-ghost btn-sm" id="kql-sample">Load sample</button>
+            </div>
+            <div class="editor-shell">
+              <div class="monaco-host" id="kql-monaco" hidden></div>
+              <textarea
+                class="plain-editor"
+                id="kql-input"
+                spellcheck="false"
+                placeholder="source&#10;| where SeverityLevel != 'info'&#10;| project TimeGenerated, Message"
+              ></textarea>
+            </div>
+            <div class="card-foot">
+              <button class="btn btn-primary" id="kql-validate">Validate</button>
+              <button class="btn btn-ghost" id="kql-clear">Clear</button>
+              <span class="status" id="kql-status"></span>
+            </div>
+          </section>
+
+          <aside class="card results-pane">
+            <div class="card-head">
+              <h2>Results</h2>
+            </div>
+            <div class="results" id="kql-results" aria-live="polite"></div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- DCR -->
+      <section class="panel" id="panel-dcr" role="tabpanel">
+        <div class="config-strip">
+          <div class="config-field config-field-grow">
+            <span class="config-label">Input</span>
+            <span class="config-static">A data collection rule, or an ARM template that contains one</span>
+          </div>
+        </div>
+
+        <div class="workspace">
+          <section class="card editor-column">
+            <div class="card-head">
+              <h2>Rule definition</h2>
+              <button class="btn btn-ghost btn-sm" id="dcr-sample">Load sample</button>
+            </div>
+            <div class="editor-shell">
+              <div class="monaco-host" id="dcr-monaco" hidden></div>
+              <textarea class="plain-editor" id="dcr-input" spellcheck="false" placeholder="{ &quot;kind&quot;: ... }"></textarea>
+            </div>
+            <div class="card-foot">
+              <button class="btn btn-primary" id="dcr-validate">Validate</button>
+              <button class="btn btn-ghost" id="dcr-clear">Clear</button>
+              <span class="status" id="dcr-status"></span>
+            </div>
+          </section>
+
+          <aside class="card results-pane">
+            <div class="card-head">
+              <h2>Results</h2>
+            </div>
+            <div class="results" id="dcr-results" aria-live="polite"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Rules follow the Azure Monitor documentation for transformations and DCR structure.</span>
+      <a href="https://github.com/el-bakkali/dcr-kql-validator" rel="noopener">Source</a>
+    </footer>
 
     <script type="module" src="/src/main.js"></script>
   </body>

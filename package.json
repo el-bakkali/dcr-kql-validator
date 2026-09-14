@@ -1,17 +1,24 @@
 {
   "name": "dcr-kql-validator",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "generate:tables": "node scripts/generate-tables.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@fluentui/web-components": "^3.1.3",
+    "@kusto/language-service-next": "^12.4.1",
+    "@kusto/monaco-kusto": "^15.0.1",
+    "monaco-editor": "~0.55.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
-    "vite": "^6"
+    "vite": "^6",
+    "vitest": "^2"
   }
 }
